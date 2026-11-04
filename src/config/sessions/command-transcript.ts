@@ -109,6 +109,8 @@ type CommandExchangeParams = Pick<
   replyId: string;
   /** The command already committed its input as a user turn; record only the reply. */
   commandInputCommitted?: boolean;
+  /** Read-only command replies stay in history but out of model context and never fence an active turn. */
+  contextFreeCommand?: boolean;
 };
 
 /** A local effect committed; this records its outcome, not delivery of the reply. */
@@ -144,6 +146,7 @@ async function recordCommandExchange(params: CommandExchangeParams) {
               await redactConfigCommandInput(commandText),
             ),
             idempotencyKey: `command-input:${params.commandId}`,
+            ...(params.contextFreeCommand ? { contextFreeCommand: true } : {}),
           },
         }),
     idempotencyKey: `command-reply:${params.commandId}:${params.replyId}`,

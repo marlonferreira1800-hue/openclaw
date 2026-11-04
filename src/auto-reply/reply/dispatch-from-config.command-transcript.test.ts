@@ -5,8 +5,13 @@ import {
   recordDeliveredCommandExchange,
   scopeCommandTranscriptId,
 } from "../../config/sessions/command-transcript.js";
+import { loadTranscriptEvents } from "../../config/sessions/session-accessor.js";
 import { readVisibleSessionTranscriptMessageEntries } from "../../plugin-sdk/session-transcript-runtime.js";
-import { mirrorDeliveredReplyToTranscript } from "./dispatch-from-config.transcript.js";
+import { setReplyPayloadMetadata } from "../reply-payload.js";
+import {
+  mirrorDeliveredReplyToTranscript,
+  transcriptMirrorForDeliveredPayload,
+} from "./dispatch-from-config.transcript.js";
 
 it("persists one selection command for its dispatch confirmation and native picker refresh", async () => {
   const state = await createOpenClawTestState({ label: "mattermost-selection", applyEnv: false });
@@ -79,4 +84,75 @@ it("persists one selection command for its dispatch confirmation and native pick
       ]),
     }),
   ]);
+});
+
+it("keeps a delivered context-free /status exchange visible in history but marked out of model context", async () => {
+  const state = await createOpenClawTestState({ label: "status-context-free", applyEnv: false });
+  onTestFinished(() => state.cleanup());
+  const storePath = state.path("sessions.json");
+  const config = { session: { store: storePath } };
+  const sessionKey = "agent:main:telegram:group:chat:topic:1";
+  const sessionId = "status-session";
+  await upsertSessionEntry({
+    agentId: "main",
+    storePath,
+    sessionKey,
+    entry: { sessionId, updatedAt: 1 },
+  });
+  const commandId = scopeCommandTranscriptId("status-message-1", {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "group:chat:topic:1",
+  });
+  const payload = setReplyPayloadMetadata(
+    { text: "Worker is running" },
+    { contextFreeCommand: true },
+  );
+  const mirror = transcriptMirrorForDeliveredPayload(
+    {
+      agentId: "main",
+      sessionKey,
+      expectedSessionId: sessionId,
+      storePath,
+      commandText: "/status",
+      commandId,
+      preferText: true,
+      idempotencyKey: `command-block:${commandId}:1`,
+    },
+    payload,
+  );
+  expect(mirror?.contextFreeCommand).toBe(true);
+  await mirrorDeliveredReplyToTranscript({ cfg: config, metadata: mirror });
+  const entries = await readVisibleSessionTranscriptMessageEntries({
+    agentId: "main",
+    storePath,
+    sessionKey,
+    sessionId,
+  });
+  expect(entries.map((entry) => entry.message)).toEqual([
+    expect.objectContaining({
+      role: "user",
+      content: [{ type: "text", text: "/status" }],
+    }),
+    expect.objectContaining({
+      role: "assistant",
+      content: expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: "Worker is running" }),
+      ]),
+    }),
+  ]);
+  const events = (await loadTranscriptEvents({
+    agentId: "main",
+    storePath,
+    sessionKey,
+    sessionId,
+  })) as Array<{ message?: Record<string, unknown> }>;
+  const messages = events.flatMap(({ message }) => (message ? [message] : []));
+  expect(messages).toHaveLength(2);
+  for (const message of messages) {
+    expect(message.excludeFromContext).toBe(true);
+    expect((message.__openclaw as Record<string, unknown> | undefined)?.contextFreeCommand).toBe(
+      true,
+    );
+  }
 });

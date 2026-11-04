@@ -283,7 +283,7 @@ type SessionTranscriptAssistantAppendOptions = {
   assertCurrent?: () => void;
   onMessageCommitted?: SessionTranscriptTurnPersistOptions["onMessageCommitted"];
   /** Delivered command exchanges are replayable conversation, not delivery bookkeeping. */
-  command?: { text: string; idempotencyKey: string };
+  command?: { text: string; idempotencyKey: string; contextFreeCommand?: boolean };
 };
 
 export async function appendAssistantMessageToSessionTranscript(
@@ -330,6 +330,9 @@ export async function appendAssistantMessageToSessionTranscript(
       usage: makeZeroUsageSnapshot(),
       stopReason: "stop" as const,
       timestamp: Date.now(),
+      ...(params.command?.contextFreeCommand
+        ? { excludeFromContext: true as const, __openclaw: { contextFreeCommand: true } }
+        : {}),
       ...(!params.command && params.deliveryMirror
         ? { openclawDeliveryMirror: params.deliveryMirror }
         : {}),
@@ -512,6 +515,12 @@ async function appendExactAssistantMessageWithSource(
                 content: [{ type: "text" as const, text: params.command.text }],
                 timestamp: Date.now(),
                 idempotencyKey: params.command.idempotencyKey,
+                ...(params.command.contextFreeCommand
+                  ? {
+                      excludeFromContext: true as const,
+                      __openclaw: { contextFreeCommand: true },
+                    }
+                  : {}),
               },
               idempotencyLookup: "scan" as const,
             },

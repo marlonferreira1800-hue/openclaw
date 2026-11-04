@@ -26,6 +26,8 @@ type TranscriptMirror = NonNullable<ReplyPayloadMetadata["sourceReplyTranscriptM
   commandId?: string;
   /** A native command turn already committed this command's input. */
   commandInputCommitted?: boolean;
+  /** The reply payload is a read-only command answer; keep it out of model context. */
+  contextFreeCommand?: true;
 };
 
 function transcriptMirrorExpectations(mirror: TranscriptMirror) {
@@ -60,6 +62,7 @@ export async function mirrorDeliveredReplyToTranscript(params: {
         commandText: mirror.commandText,
         commandId: mirror.commandId,
         ...(mirror.commandInputCommitted ? { commandInputCommitted: true } : {}),
+        ...(mirror.contextFreeCommand ? { contextFreeCommand: true } : {}),
         replyText: mirror.text,
         replyId: mirror.idempotencyKey ?? mirror.text,
       });
@@ -100,6 +103,9 @@ export function transcriptMirrorForDeliveredPayload(
     ...metadata,
     text: sendable.text,
     mediaUrls: sendable.mediaUrls.length > 0 ? sendable.mediaUrls : undefined,
+    ...(getReplyPayloadMetadata(payload)?.contextFreeCommand === true
+      ? { contextFreeCommand: true as const }
+      : {}),
   };
 }
 

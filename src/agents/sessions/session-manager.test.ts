@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { makeUserMessage } from "../../../test/helpers/user-message.js";
+import { setReplyPayloadMetadata } from "../../auto-reply/reply-payload.js";
+import {
+  mirrorDeliveredReplyToTranscript,
+  transcriptMirrorForDeliveredPayload,
+} from "../../auto-reply/reply/dispatch-from-config.transcript.js";
 import * as configEnv from "../../config/config-env-vars.js";
+import { scopeCommandTranscriptId } from "../../config/sessions/command-transcript.js";
 import {
   formatSqliteSessionFileMarker,
   parseSqliteSessionFileMarker,
@@ -450,6 +456,54 @@ describe("SessionManager stale-parent rebase", () => {
         message: { role: "assistant", content: [{ type: "text", text: "Worker is running" }] },
       },
       { id, parentId: "status-assistant", message: continuation },
+    ]);
+    const context = manager.buildSessionContext();
+    expect(context.messages).toEqual([makeUserMessage("base", 1), continuation]);
+    expect(SessionManager.open(target, dir).buildSessionContext()).toEqual(context);
+  });
+
+  it("continues a prepared assistant when a delivered context-free command lands after turn admission", async () => {
+    const { dir, target, manager, events } = await setup();
+    const commandId = scopeCommandTranscriptId("status-message-1", {
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "group:chat:topic:1",
+    });
+    const payload = setReplyPayloadMetadata(
+      { text: "Worker is running" },
+      { contextFreeCommand: true },
+    );
+    const mirror = transcriptMirrorForDeliveredPayload(
+      {
+        agentId: target.agentId,
+        sessionKey: target.sessionKey,
+        expectedSessionId: target.sessionId,
+        storePath: target.storePath,
+        commandText: "/status",
+        commandId,
+        preferText: true,
+        idempotencyKey: `command-block:${commandId}:1`,
+      },
+      payload,
+    );
+    await mirrorDeliveredReplyToTranscript({
+      metadata: mirror,
+      cfg: { session: { store: target.storePath } },
+    });
+    const continuation = rebaseAssistant("answer", 4);
+    const id = manager.appendMessage(continuation);
+    expect(await events()).toMatchObject([
+      { type: "session" },
+      { id: "base", message: { role: "user", content: "base" } },
+      {
+        parentId: "base",
+        message: { role: "user", content: [{ type: "text", text: "/status" }] },
+      },
+      {
+        parentId: expect.any(String),
+        message: { role: "assistant", content: [{ type: "text", text: "Worker is running" }] },
+      },
+      { id, message: continuation },
     ]);
     const context = manager.buildSessionContext();
     expect(context.messages).toEqual([makeUserMessage("base", 1), continuation]);
