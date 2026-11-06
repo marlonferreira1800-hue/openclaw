@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: rewind-ios-demo-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rewind-demo:
     name: ios-rewind-demo
