@@ -125,7 +125,11 @@ run_revision() {
   xcrun simctl boot "$simulator"
   xcrun simctl bootstatus "$simulator" -b
   xcrun simctl status_bar "$simulator" override --time 09:41 --batteryState charged --batteryLevel 100
-  xcrun simctl addphoto "$simulator" "$scratch/photo.png"
+  xcrun simctl addmedia "$simulator" "$scratch/photo.png"
+  # Force the Photos daemon to index the seed before the test opens the picker.
+  xcrun simctl launch "$simulator" com.apple.mobileslideshow >/dev/null 2>&1 || true
+  sleep 3
+  xcrun simctl terminate "$simulator" com.apple.mobileslideshow >/dev/null 2>&1 || true
   (
     cd "$tree"
     ./scripts/ios-configure-signing.sh
@@ -146,7 +150,7 @@ run_revision() {
   wait "$video_pid" 2>/dev/null || true
   video_pid=""
   kill "$fixture_pid"
-  wait "$fixture_pid"
+  wait "$fixture_pid" 2>/dev/null || true
   fixture_pid=""
   xcrun simctl shutdown "$simulator"
   xcrun simctl delete "$simulator"
@@ -165,7 +169,11 @@ if [[ -n "$baseline" ]]; then
     (cd "$before_checkout" && node scripts/prepare-apple-mermaid.mjs)
   fi
   git -C "$before_checkout" diff --exit-code -- apps/ios/Sources apps/shared/OpenClawKit/Sources
-  run_revision "$before_checkout" before
+  status_before=0
+  run_revision "$before_checkout" before || status_before=$?
   git -C "$before_checkout" diff --exit-code -- apps/ios/Sources apps/shared/OpenClawKit/Sources
 fi
-run_revision "$root" after
+status_after=0
+run_revision "$root" after || status_after=$?
+printf 'Stage results: before=%s after=%s\n' "${status_before:-0}" "$status_after"
+[[ "${status_before:-0}" -eq 0 && "$status_after" -eq 0 ]]
