@@ -1,0 +1,70 @@
+name: scratch-rewind-proof-openclawkit
+on:
+  push:
+    branches:
+      - scratch/openclawkit-rewind-proof
+  workflow_dispatch:
+
+jobs:
+  head-green:
+    name: rewind tests on PR head (expect PASS)
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d25b7a96575db53fa3eba6e049f6ab5732e94424
+          fetch-depth: 0
+      - name: Toolchain provenance
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run the 3 rewind regression tests
+        run: |
+          cd apps/shared/OpenClawKit
+          set +e
+          swift test --filter "rewind preserves" 2>&1 | tee "$RUNNER_TEMP/head-tests.log"
+          ec=${PIPESTATUS[0]}
+          echo "swift-test-exit=$ec" | tee "$RUNNER_TEMP/head-exit.txt"
+          exit 0
+      - name: Upload head logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewind-proof-head-green
+          path: |
+            ${{ runner.temp }}/head-tests.log
+            ${{ runner.temp }}/head-exit.txt
+
+  base-red:
+    name: rewind tests on PR base + new tests (expect FAIL)
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 58255890ba9ed690fb682e7e250905ebe79fcb72
+          fetch-depth: 0
+      - name: Overlay the new regression tests onto the base tree
+        run: |
+          git fetch origin d25b7a96575db53fa3eba6e049f6ab5732e94424
+          git checkout d25b7a96575db53fa3eba6e049f6ab5732e94424 -- apps/shared/OpenClawKit/Tests/OpenClawKitTests/ChatViewModelSessionActionTests.swift
+          git status --short
+      - name: Toolchain provenance
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run the 3 rewind regression tests
+        run: |
+          cd apps/shared/OpenClawKit
+          set +e
+          swift test --filter "rewind preserves" 2>&1 | tee "$RUNNER_TEMP/base-tests.log"
+          ec=${PIPESTATUS[0]}
+          echo "swift-test-exit=$ec" | tee "$RUNNER_TEMP/base-exit.txt"
+          exit 0
+      - name: Upload base logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewind-proof-base-red
+          path: |
+            ${{ runner.temp }}/base-tests.log
+            ${{ runner.temp }}/base-exit.txt
