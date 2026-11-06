@@ -189,6 +189,7 @@ const rewindHistorySeed = [
 let rewindHeldReply = null;
 let rewindHeldSocket = null;
 let rewindRequestCount = 0;
+let rewindRequestedAtMs = null;
 let rewindReleased = false;
 let rewindCompletedAt = null;
 const rewindRequestWaiters = new Set();
@@ -198,6 +199,7 @@ function rewindState() {
     requested: rewindRequestCount > 0,
     held: rewindHeldReply !== null,
     released: rewindReleased,
+    requestedAtMs: rewindRequestedAtMs,
     completedAtMs: rewindCompletedAt,
     wire: rewindWire,
   };
@@ -918,7 +920,8 @@ wss.on("connection", (ws) => {
           break;
         }
         rewindRequestCount++;
-        rewindWire.push({ method: "sessions.rewind", phase: "held", atMs: Date.now() });
+        rewindRequestedAtMs = Date.now();
+        rewindWire.push({ method: "sessions.rewind", phase: "held", atMs: rewindRequestedAtMs });
         rewindHeldReply = reply;
         rewindHeldSocket = ws;
         ws.once("close", () => {
