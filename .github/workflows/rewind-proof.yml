@@ -18,6 +18,23 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+          node --version
+      - name: Setup pnpm (pinned by packageManager)
+        run: |
+          corepack enable 2>/dev/null || true
+          corepack prepare --activate "pnpm@12.15.0" 2>/dev/null || npm install -g pnpm@12.15.0
+          pnpm --version
+      - name: Install gateway-protocol JS deps (SwiftPM build plugin needs esbuild)
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --prefer-offline --optional \
+            --filter '@openclaw/gateway-protocol...' \
+            --config.ignore-scripts=false \
+            --config.engine-strict=false \
+            --config.enable-pre-post-scripts=true \
+            --config.side-effects-cache=true
       - name: Run the 3 rewind regression tests
         run: |
           cd apps/shared/OpenClawKit
@@ -52,6 +69,23 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+          node --version
+      - name: Setup pnpm (pinned by packageManager)
+        run: |
+          corepack enable 2>/dev/null || true
+          corepack prepare --activate "pnpm@12.15.0" 2>/dev/null || npm install -g pnpm@12.15.0
+          pnpm --version
+      - name: Install gateway-protocol JS deps (SwiftPM build plugin needs esbuild)
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --prefer-offline --optional \
+            --filter '@openclaw/gateway-protocol...' \
+            --config.ignore-scripts=false \
+            --config.engine-strict=false \
+            --config.enable-pre-post-scripts=true \
+            --config.side-effects-cache=true
       - name: Run the 3 rewind regression tests
         run: |
           cd apps/shared/OpenClawKit
