@@ -6,10 +6,21 @@ import XCTest
 /// Runs the real app in a task-owned simulator against the owned loopback fixture
 /// Gateway (scripts/test-ios-shell-gateway.mjs --rewind); no live credentials.
 /// The pre-fix tree fails this exact test with REWIND_PROOF_COMPOSER_LOST.
+///
+/// Flow note: the app abandons any mutation RPC after 15000ms
+/// (ChatGatewayRequest.swift mutationTimeoutMs), so the held window stays well
+/// under that: the photo is staged BEFORE the rewind starts, only the short
+/// text edit happens while the response is held, and the fixture reports the
+/// measured hold so the test fails loudly if the window ever nears the timeout.
+/// The Branches control check at the end is diagnostic-only: branch listing is
+/// not the behavior corrected by #193867, so a missing menu is captured as a
+/// screenshot and a log line, never asserted.
 @MainActor
 final class RewindComposerUITests: XCTestCase {
     override func setUpWithError() throws {
-        continueAfterFailure = false
+        // Keep going after the expected pre-fix failures so the baseline tree
+        // records every REWIND_PROOF marker plus the post-release screenshots.
+        continueAfterFailure = true
     }
 
     func testNewerComposerSurvivesDelayedRewind() async throws {
@@ -38,24 +49,10 @@ final class RewindComposerUITests: XCTestCase {
         XCTAssertTrue(setupBubble.waitForExistence(timeout: 5), app.debugDescription)
         self.capture(app, named: "history-before-rewind")
 
-        // Trigger Rewind on the seeded user message; the fixture holds the response.
-        rewoundBubble.press(forDuration: 1)
-        let rewindAction = app.buttons["Rewind to Here"]
-        XCTAssertTrue(rewindAction.waitForExistence(timeout: 5), app.debugDescription)
-        self.capture(app, named: "rewind-affordance")
-        rewindAction.tap()
-
-        let held = try await self.rewindRequest(fixtureURL, path: "await-request", timeout: 30)
-        XCTAssertTrue(held.requested, "The real app must send sessions.rewind")
-        XCTAssertTrue(held.held, "The fixture must hold the rewind response")
-        self.capture(app, named: "rewind-pending")
-
-        // While the completion is in flight, edit the composer: newer text plus a
-        // staged photo attachment.
-        input.tap()
-        let draft = "Keep this newer note"
-        input.typeText(draft)
-        XCTAssertEqual(input.value as? String, draft)
+        // Stage the photo attachment BEFORE the rewind begins. The iOS 27 system
+        // picker can take 60s+ to label thumbnails on a fresh simulator, far
+        // beyond the app's 15000ms mutation timeout, so it cannot run while the
+        // rewind response is held.
         let picker = app.buttons["chat-attachment-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 8), app.debugDescription)
         picker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
@@ -85,11 +82,31 @@ final class RewindComposerUITests: XCTestCase {
         done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let chip = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "photo-")).firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 8), "SETUP: staged photo attachment")
+        self.capture(app, named: "photo-staged-before-rewind")
+
+        // Trigger Rewind on the seeded user message; the fixture holds the response.
+        rewoundBubble.press(forDuration: 1)
+        let rewindAction = app.buttons["Rewind to Here"]
+        XCTAssertTrue(rewindAction.waitForExistence(timeout: 5), app.debugDescription)
+        self.capture(app, named: "rewind-affordance")
+        rewindAction.tap()
+
+        let held = try await self.rewindRequest(fixtureURL, path: "await-request", timeout: 30)
+        XCTAssertTrue(held.requested, "The real app must send sessions.rewind")
+        XCTAssertTrue(held.held, "The fixture must hold the rewind response")
+        self.capture(app, named: "rewind-pending")
+
+        // The only edit inside the held window: a few seconds of typing, safely
+        // inside the app's 15000ms mutation timeout.
+        input.tap()
+        let draft = "Keep this newer note"
+        input.typeText(draft)
         XCTAssertEqual(input.value as? String, draft)
         self.capture(app, named: "newer-draft-during-pending-rewind")
 
-        // Release the held completion. The fixture still reports the rewound
-        // prompt/attachments, then serves truncated history and refreshed branches.
+        // Release the held completion immediately. The fixture still reports the
+        // rewound prompt/attachments, then serves truncated history and a
+        // refreshed branch list.
         let released = try await self.rewindRequest(fixtureURL, path: "release", method: "POST")
         XCTAssertTrue(released.released)
 
@@ -101,6 +118,23 @@ final class RewindComposerUITests: XCTestCase {
         let state = try await self.rewindRequest(fixtureURL, path: "state")
         self.capture(app, named: "composer-after-release")
 
+        // Harness health: the rewind response must have been delivered well
+        // inside the app's 15000ms mutation timeout, or neither tree exercises
+        // the code path the fix changes.
+        if let requestedAt = state.requestedAtMs, let completedAt = state.completedAtMs {
+            XCTAssertLessThan(
+                completedAt - requestedAt,
+                12000,
+                "HARNESS_TIMEOUT_RISK: app mutation timeout is 15000ms; measured hold was \(completedAt - requestedAt)ms")
+        } else {
+            XCTFail("HARNESS_TIMEOUT_RISK: fixture did not report rewind request/completion timestamps")
+        }
+        XCTAssertTrue(
+            state.wire.contains { $0.method == "sessions.rewind" && $0.phase == "completed" },
+            "HARNESS_REWIND_RESPONSE_MISSING: fixture never delivered the rewind response")
+
+        // Core before/after: the pre-fix tree restores the rewound prompt and
+        // drops the staged photo; the fixed tree keeps both.
         XCTAssertEqual(
             input.value as? String,
             draft,
@@ -115,17 +149,24 @@ final class RewindComposerUITests: XCTestCase {
             state.wire.contains { $0.method == "sessions.branches.list" && $0.phase == "after-release" },
             "REWIND_PROOF_BRANCH_REFRESH_MISSING")
 
-        // The refreshed branch list is visible in the real composer controls.
+        // Diagnostic only (not the behavior corrected by #193867): the refreshed
+        // branch list should surface in the composer controls. Never asserted.
         let branches = app.buttons["Branches"]
-        XCTAssertTrue(branches.waitForExistence(timeout: 5), app.debugDescription)
-        branches.tap()
-        let priorBranch = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@", "4 messages")).firstMatch
-        XCTAssertTrue(
-            priorBranch.waitForExistence(timeout: 5),
-            "Branch refresh must list the rewound-away branch")
-        self.capture(app, named: "branches-after-rewind")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        if branches.waitForExistence(timeout: 10) {
+            branches.tap()
+            let priorBranch = app.descendants(matching: .any).matching(NSPredicate(
+                format: "label CONTAINS %@", "4 messages")).firstMatch
+            if priorBranch.waitForExistence(timeout: 5) {
+                self.capture(app, named: "branches-after-rewind")
+            } else {
+                NSLog("BRANCH DIAGNOSTIC: Branches menu opened but the rewound-away branch row is missing")
+                self.capture(app, named: "branches-menu-missing-row")
+            }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        } else {
+            NSLog("BRANCH DIAGNOSTIC: Branches control absent after rewind refresh")
+            self.capture(app, named: "branches-menu-missing")
+        }
     }
 
     private func launchChatApp(_ app: XCUIApplication, setupCode: String) {
@@ -188,6 +229,8 @@ final class RewindComposerUITests: XCTestCase {
         let requested: Bool
         let held: Bool
         let released: Bool
+        let requestedAtMs: Int?
+        let completedAtMs: Int?
         let wire: [RewindWireEntry]
     }
 }
