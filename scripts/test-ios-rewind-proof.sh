@@ -104,6 +104,8 @@ run_test() {
     -only-testing:OpenClawUITests/RewindComposerUITests/testNewerComposerSurvivesDelayedRewind \
     test > "$log" 2>&1 || status=$?
   tail -c 8192 "$log"
+  echo "--- fixture wire log ($stage) ---"
+  cat "$output/Rewind-$stage-gateway.log" 2>/dev/null || true
   [[ -d "$result" ]] || return 1
   xcrun xcresulttool get test-results summary --path "$result" --compact > "$result.summary.json"
   xcrun xcresulttool export attachments --path "$result" --output-path "$output/attachments-$stage"
@@ -111,7 +113,7 @@ run_test() {
     # A compile/setup/crash failure is never behavioral red.
     [[ "$status" -ne 0 ]] || return 1
     grep -q "$expected_marker" "$log" || return 1
-    node -e 'const r=require(process.argv[1]);if(r.result!=="Failed"||r.failedTests!==1||r.passedTests!==0)process.exit(1)' "$result.summary.json"
+    node -e 'const r=require(process.argv[1]);if(r.result!=="Failed"||r.failedTests!==1||r.passedTests!==0)process.exit(1)' "$result.summary.json" || return 1
     printf 'Verified baseline behavioral red: %s\n' "$expected_marker"
   else
     [[ "$status" -eq 0 ]]
@@ -141,10 +143,11 @@ run_revision() {
   fixture_pid=$!
   xcrun simctl io "$simulator" recordVideo --codec=h264 --force "$output/Rewind-$stage.mov" > /dev/null 2>&1 &
   video_pid=$!
+  local rc=0
   if [[ "$stage" == before ]]; then
-    run_test "$tree" "$stage" REWIND_PROOF_COMPOSER_LOST
+    run_test "$tree" "$stage" REWIND_PROOF_COMPOSER_LOST || rc=$?
   else
-    run_test "$tree" "$stage" ""
+    run_test "$tree" "$stage" "" || rc=$?
   fi
   kill -INT "$video_pid"
   wait "$video_pid" 2>/dev/null || true
@@ -155,6 +158,7 @@ run_revision() {
   xcrun simctl shutdown "$simulator"
   xcrun simctl delete "$simulator"
   simulator=""
+  return "$rc"
 }
 
 if [[ -n "$baseline" ]]; then
