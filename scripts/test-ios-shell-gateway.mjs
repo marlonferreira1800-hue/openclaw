@@ -234,6 +234,15 @@ function handleRewindControl(req, res) {
     rewindCompletedAt = Date.now();
     rewindWire.push({ method: "sessions.rewind", phase: "completed", atMs: rewindCompletedAt });
     reply({ editorText: rewindEditorText, editorAttachments: [] });
+    // Mirror the real Gateway (sessions-rewind.ts): after the rewind response it
+    // broadcasts sessions.changed, and the app then refetches history + branches.
+    for (const client of wss.clients) {
+      client.send(JSON.stringify({
+        type: "event",
+        event: "sessions.changed",
+        payload: { sessionKey: rewindSessionKey, agentId: "main", reason: "rewind", ts: Date.now() },
+      }));
+    }
     res.end(JSON.stringify(rewindState()));
   } else {
     res.statusCode = 404;
