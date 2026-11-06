@@ -64,7 +64,9 @@ final class RewindComposerUITests: XCTestCase {
         library.tap()
         // System-owned picker selectors validated on iOS 27 by PhotoAttachmentLockUITests.
         let photo = app.images.matching(NSPredicate(format: "label BEGINSWITH %@", "Photo,")).firstMatch
-        if !photo.waitForExistence(timeout: 20) {
+        // Picker thumbnails get their "Photo, ..." labels only after the picker
+        // finishes loading: observed 30+s on a freshly booted simulator.
+        if !photo.waitForExistence(timeout: 60) {
             NSLog(
                 "PICKER DIAGNOSTICS images=%d cells=%d buttons=%@ texts=%@",
                 app.images.count, app.cells.count,
@@ -75,7 +77,7 @@ final class RewindComposerUITests: XCTestCase {
             add(hierarchy)
             self.capture(app, named: "picker-diagnostics")
         }
-        XCTAssertTrue(photo.waitForExistence(timeout: 2), "SETUP: synthetic system picker photo")
+        XCTAssertTrue(photo.waitForExistence(timeout: 30), "SETUP: synthetic system picker photo")
         photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let done = app.navigationBars["Photos"].buttons["Done"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "SETUP: system picker Done")
