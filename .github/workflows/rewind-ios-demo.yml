@@ -34,6 +34,15 @@ jobs:
           set -euo pipefail
           node scripts/prepare-apple-mermaid.mjs
 
+
+      - name: Install Watch Rust toolchain
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          watch_toolchain="$(awk -F '"' '/^channel =/ { print $2; exit }' apps/shared/OpenClawWatchRTC/rust-toolchain.toml)"
+          test -n "$watch_toolchain"
+          rustup toolchain install "$watch_toolchain" --profile minimal --component rust-src
+
       - name: Install XcodeGen / SwiftFormat / SwiftLint
         run: |
           set -euo pipefail
