@@ -2461,7 +2461,7 @@
     "jszip": "3.10.2",
     "kysely": "0.29.7",
     "linkedom": "0.18.14",
-    "minimatch": "10.2.6",
+    "minimatch": "11.0.1",
     "node-edge-tts": "1.2.12",
     "npm": "12.2.1",
     "openai": "7.45.1",
